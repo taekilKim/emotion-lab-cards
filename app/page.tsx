@@ -1,29 +1,54 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getRandomCard } from "@/lib/cards";
 import { EmotionCard } from "@/lib/types";
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 export default function Home() {
   const [todayCard, setTodayCard] = useState<EmotionCard | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
+  const router = useRouter();
+  const supabase = createClient();
 
   useEffect(() => {
+    // 인증 상태 확인
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user);
+    });
+
     // 오늘 날짜를 키로 사용하여 매일 같은 카드가 나오도록 설정
-    const today = new Date().toISOString().split("T")[0];
-    const savedCard = localStorage.getItem(`card-${today}`);
+    const fetchTodayCard = async () => {
+      const today = new Date().toISOString().split("T")[0];
+      const savedCard = localStorage.getItem(`card-${today}`);
 
-    if (savedCard) {
-      setTodayCard(JSON.parse(savedCard));
-    } else {
-      const randomCard = getRandomCard();
-      setTodayCard(randomCard);
-      localStorage.setItem(`card-${today}`, JSON.stringify(randomCard));
-    }
+      if (savedCard) {
+        setTodayCard(JSON.parse(savedCard));
+        setIsLoading(false);
+      } else {
+        try {
+          const response = await fetch("/api/cards?random=true");
+          const randomCard = await response.json();
+          setTodayCard(randomCard);
+          localStorage.setItem(`card-${today}`, JSON.stringify(randomCard));
+        } catch (error) {
+          console.error("Failed to fetch card:", error);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
 
-    setIsLoading(false);
+    fetchTodayCard();
   }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    router.refresh();
+  };
 
   if (isLoading || !todayCard) {
     return (
@@ -41,6 +66,41 @@ export default function Home() {
   return (
     <main className="min-h-screen flex items-center justify-center p-4 md:p-8 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
       <div className="max-w-2xl w-full">
+        {/* 상단 네비게이션 */}
+        <div className="flex justify-end mb-4 gap-2">
+          {user ? (
+            <>
+              <Link
+                href="/history"
+                className="px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg shadow hover:shadow-md transition-all text-sm font-medium border border-gray-200 dark:border-gray-700"
+              >
+                내 기록
+              </Link>
+              <button
+                onClick={handleLogout}
+                className="px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg shadow hover:shadow-md transition-all text-sm font-medium border border-gray-200 dark:border-gray-700"
+              >
+                로그아웃
+              </button>
+            </>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className="px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg shadow hover:shadow-md transition-all text-sm font-medium border border-gray-200 dark:border-gray-700"
+              >
+                로그인
+              </Link>
+              <Link
+                href="/signup"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow hover:shadow-md transition-all text-sm font-medium"
+              >
+                회원가입
+              </Link>
+            </>
+          )}
+        </div>
+
         {/* 헤더 */}
         <div className="text-center mb-8">
           <h1 className="text-4xl md:text-5xl font-bold mb-3 text-gray-900 dark:text-white">
@@ -49,6 +109,11 @@ export default function Home() {
           <p className="text-lg md:text-xl text-gray-600 dark:text-gray-300">
             하루 한 번, 나를 관찰하는 감정 실험
           </p>
+          {user && (
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+              {user.email}님 환영합니다
+            </p>
+          )}
         </div>
 
         {/* 오늘의 카드 */}

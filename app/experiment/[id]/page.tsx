@@ -2,8 +2,9 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { emotionCards } from "@/lib/cards";
 import { EmotionCard } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+import { createRecord } from "@/lib/api/records";
 
 type ExperimentStep = "before" | "doing" | "after" | "memo";
 
@@ -15,39 +16,82 @@ export default function ExperimentPage() {
   const [emotionBefore, setEmotionBefore] = useState<number>(5);
   const [emotionAfter, setEmotionAfter] = useState<number>(5);
   const [memo, setMemo] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const supabase = createClient();
 
   useEffect(() => {
-    const cardId = params.id as string;
-    const foundCard = emotionCards.find((c) => c.id === cardId);
-    if (foundCard) {
-      setCard(foundCard);
-    } else {
-      router.push("/");
-    }
-  }, [params.id, router]);
-
-  const handleSave = () => {
-    if (!card) return;
-
-    const record = {
-      id: `record-${Date.now()}`,
-      cardId: card.id,
-      date: new Date().toISOString(),
-      emotionBefore,
-      emotionAfter,
-      memo,
-      completed: true,
+    const fetchCard = async () => {
+      const cardId = params.id as string;
+      try {
+        const response = await fetch(`/api/cards/${cardId}`);
+        if (response.ok) {
+          const foundCard = await response.json();
+          setCard(foundCard);
+        } else {
+          router.push("/");
+        }
+      } catch (error) {
+        console.error("Failed to fetch card:", error);
+        router.push("/");
+      }
     };
 
-    // localStorage에 기록 저장
-    const existingRecords = JSON.parse(
-      localStorage.getItem("emotion-records") || "[]"
-    );
-    existingRecords.push(record);
-    localStorage.setItem("emotion-records", JSON.stringify(existingRecords));
+    fetchCard();
+  }, [params.id, router]);
 
-    // 완료 페이지로 이동
-    router.push("/complete");
+  const handleSave = async () => {
+    if (!card || saving) return;
+    setSaving(true);
+
+    try {
+      // 사용자 인증 확인
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        // 로그인 상태: Supabase에 저장
+        const { error } = await createRecord({
+          cardId: card.id,
+          date: new Date().toISOString(),
+          emotionBefore,
+          emotionAfter,
+          memo,
+          completed: true,
+        });
+
+        if (error) {
+          console.error("Failed to save record:", error);
+          alert("기록 저장에 실패했습니다.");
+          setSaving(false);
+          return;
+        }
+      } else {
+        // 비로그인 상태: localStorage에 저장
+        const record = {
+          id: `record-${Date.now()}`,
+          cardId: card.id,
+          date: new Date().toISOString(),
+          emotionBefore,
+          emotionAfter,
+          memo,
+          completed: true,
+        };
+
+        const existingRecords = JSON.parse(
+          localStorage.getItem("emotion-records") || "[]"
+        );
+        existingRecords.push(record);
+        localStorage.setItem("emotion-records", JSON.stringify(existingRecords));
+      }
+
+      // 완료 페이지로 이동
+      router.push("/complete");
+    } catch (error) {
+      console.error("Error saving record:", error);
+      alert("기록 저장 중 오류가 발생했습니다.");
+      setSaving(false);
+    }
   };
 
   if (!card) {
@@ -301,9 +345,10 @@ export default function ExperimentPage() {
                 </button>
                 <button
                   onClick={handleSave}
-                  className="flex-1 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white font-semibold rounded-xl shadow-lg transition-all"
+                  disabled={saving}
+                  className="flex-1 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white font-semibold rounded-xl shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  저장하고 완료
+                  {saving ? "저장 중..." : "저장하고 완료"}
                 </button>
               </div>
             </div>

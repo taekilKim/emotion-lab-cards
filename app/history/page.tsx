@@ -2,27 +2,76 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { EmotionRecord } from "@/lib/types";
-import { emotionCards } from "@/lib/cards";
+import { EmotionRecord, EmotionCard } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+import { getRecords } from "@/lib/api/records";
 
 export default function HistoryPage() {
   const [records, setRecords] = useState<EmotionRecord[]>([]);
+  const [cards, setCards] = useState<Map<string, EmotionCard>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const supabase = createClient();
 
   useEffect(() => {
-    const savedRecords = JSON.parse(
-      localStorage.getItem("emotion-records") || "[]"
-    );
-    // 최신순으로 정렬
-    const sortedRecords = savedRecords.sort(
-      (a: EmotionRecord, b: EmotionRecord) =>
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
-    setRecords(sortedRecords);
+    const fetchRecords = async () => {
+      try {
+        // 사용자 인증 확인
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (user) {
+          // 로그인 상태: Supabase에서 가져오기
+          const { data, error } = await getRecords();
+          if (!error && data) {
+            setRecords(data);
+          }
+        } else {
+          // 비로그인 상태: localStorage에서 가져오기
+          const savedRecords = JSON.parse(
+            localStorage.getItem("emotion-records") || "[]"
+          );
+          const sortedRecords = savedRecords.sort(
+            (a: EmotionRecord, b: EmotionRecord) =>
+              new Date(b.date).getTime() - new Date(a.date).getTime()
+          );
+          setRecords(sortedRecords);
+        }
+      } catch (error) {
+        console.error("Failed to fetch records:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecords();
   }, []);
 
-  const getCardById = (cardId: string) => {
-    return emotionCards.find((c) => c.id === cardId);
-  };
+  useEffect(() => {
+    // 카드 정보 가져오기
+    const fetchCards = async () => {
+      const uniqueCardIds = [...new Set(records.map((r) => r.cardId))];
+      const cardMap = new Map<string, EmotionCard>();
+
+      for (const cardId of uniqueCardIds) {
+        try {
+          const response = await fetch(`/api/cards/${cardId}`);
+          if (response.ok) {
+            const card = await response.json();
+            cardMap.set(cardId, card);
+          }
+        } catch (error) {
+          console.error(`Failed to fetch card ${cardId}:`, error);
+        }
+      }
+
+      setCards(cardMap);
+    };
+
+    if (records.length > 0) {
+      fetchCards();
+    }
+  }, [records]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -34,6 +83,14 @@ export default function HistoryPage() {
       minute: "2-digit",
     }).format(date);
   };
+
+  if (loading) {
+    return (
+      <main className="min-h-screen flex items-center justify-center p-8 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
+        <div className="animate-pulse text-xl">로딩 중...</div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen p-4 md:p-8 bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
@@ -84,7 +141,7 @@ export default function HistoryPage() {
         ) : (
           <div className="space-y-4">
             {records.map((record) => {
-              const card = getCardById(record.cardId);
+              const card = cards.get(record.cardId);
               if (!card) return null;
 
               const emotionChange = record.emotionAfter - record.emotionBefore;
